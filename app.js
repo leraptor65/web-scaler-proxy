@@ -3,16 +3,16 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
-const cookie = require('cookie');
 const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
+const zlib = require('zlib');
 
 const app = express();
 const port = 1337;
 
-// ** MODIFIED **: Enable CORS for all requests at the very top of the middleware stack.
-// This is the best practice and ensures headers are set correctly for all responses.
+// Use the cors package to handle all CORS-related functionality,
+// including preflight OPTIONS requests. This should be the first middleware.
 app.use(cors());
 
 // --- Live Reload Setup ---
@@ -38,9 +38,6 @@ function broadcastReload() {
 
 let lastReportedHeight = 'N/A';
 
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-
 const dataDir = path.join(__dirname, 'data');
 const configPath = path.join(dataDir, 'config.json');
 
@@ -65,8 +62,9 @@ function saveConfig(config) {
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 }
 
-// Endpoint for reporting height
-app.post('/report-height', (req, res) => {
+// Endpoint for reporting height. We apply the express.json() middleware here
+// specifically, so it doesn't interfere with the main proxy logic.
+app.post('/report-height', express.json(), (req, res) => {
     const { height } = req.body;
     if (height && typeof height === 'number') {
         lastReportedHeight = Math.round(height);
@@ -95,7 +93,8 @@ app.get('/config', (req, res) => {
     });
 });
 
-app.post('/config', (req, res) => {
+// We apply the express.urlencoded() middleware here specifically for the config form.
+app.post('/config', express.urlencoded({ extended: true }), (req, res) => {
     const { targetUrl, scaleFactor, scrollSpeed, scrollSequence } = req.body;
     const autoScroll = req.body.autoScroll === 'on';
 
@@ -114,27 +113,45 @@ app.post('/config', (req, res) => {
     }
 });
 
-// ** NEW **: Explicitly handle preflight OPTIONS requests before they reach the main proxy handler.
-// The `cors` middleware will handle sending the correct headers and a 204 status, terminating the request.
-app.options('/*', cors());
-
 // --- Main Proxy Handler ---
+// This now comes after the specific routes and does not have the body parsers running.
 app.use('/', async (req, res) => {
     const config = getConfig();
-    const target = new URL(config.targetUrl);
-    
-    let targetUrl;
-    if (req.originalUrl === '/') {
-        targetUrl = new URL(config.targetUrl);
-    } else {
-        targetUrl = new URL(req.originalUrl, target.origin);
+    let target = new URL(config.targetUrl); // Start with default target from config
+    let originalUrl = req.originalUrl;
+    const proxyOrigin = `${req.protocol}://${req.get('host')}`;
+
+    // --- NEW: Logic to handle requests for specific subdomains ---
+    const proxyHostPrefix = '/--proxy-host--/';
+    if (req.originalUrl.startsWith(proxyHostPrefix)) {
+        // This is a request for a resource on a specific subdomain.
+        const parts = req.originalUrl.substring(proxyHostPrefix.length).split('/');
+        const originalHost = parts.shift(); // e.g., 'a.mortgagenewsdaily.com'
+        originalUrl = '/' + parts.join('/'); // The rest of the path, e.g., '/assets/foo.png'
+
+        // Create a new target URL object based on the extracted host for this request.
+        target = new URL(`${target.protocol}//${originalHost}`);
     }
+    
+    const targetUrl = originalUrl === '/' ? new URL(config.targetUrl) : new URL(originalUrl, target.origin);
 
     try {
         console.log(`Proxying ${req.method} request for: ${targetUrl.href}`);
 
         const requestHeaders = { ...req.headers };
         delete requestHeaders.host;
+
+        let referer = target.origin;
+        if (requestHeaders.referer) {
+            try {
+                const refererUrl = new URL(requestHeaders.referer);
+                if (!refererUrl.pathname.startsWith(proxyHostPrefix)) {
+                     referer = new URL(refererUrl.pathname + refererUrl.search, target.origin).href;
+                }
+            } catch (e) {
+                // Ignore invalid referer headers
+            }
+        }
 
         const axiosConfig = {
             method: req.method,
@@ -145,7 +162,7 @@ app.use('/', async (req, res) => {
                 origin: target.origin,
                 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                 'accept-encoding': 'gzip, deflate, br',
-                'referer': config.targetUrl,
+                'referer': referer,
             },
             responseType: 'stream',
             validateStatus: () => true,
@@ -161,9 +178,7 @@ app.use('/', async (req, res) => {
 
         if (responseHeaders['set-cookie']) {
             const cookies = Array.isArray(responseHeaders['set-cookie']) ? responseHeaders['set-cookie'] : [responseHeaders['set-cookie']];
-            const rewrittenCookies = cookies.map(c => {
-                return c.split(';').map(p => p.trim()).filter(p => !p.toLowerCase().startsWith('domain=') && p.toLowerCase() !== 'secure').join('; ');
-            });
+            const rewrittenCookies = cookies.map(c => c.split(';').map(p => p.trim()).filter(p => !p.toLowerCase().startsWith('domain=') && p.toLowerCase() !== 'secure').join('; '));
             res.setHeader('Set-Cookie', rewrittenCookies);
         }
 
@@ -175,7 +190,7 @@ app.use('/', async (req, res) => {
         
         Object.keys(responseHeaders).forEach(key => {
             const lowerKey = key.toLowerCase();
-            if (!['content-security-policy', 'x-frame-options', 'transfer-encoding', 'set-cookie', 'location'].includes(lowerKey)) {
+            if (!['content-security-policy', 'x-frame-options', 'transfer-encoding', 'set-cookie', 'location', 'access-control-allow-origin', 'access-control-allow-methods', 'access-control-allow-headers', 'access-control-allow-credentials'].includes(lowerKey)) {
                 res.setHeader(key, responseHeaders[key]);
             }
         });
@@ -183,13 +198,42 @@ app.use('/', async (req, res) => {
         const contentType = responseHeaders['content-type'] || '';
         
         if (contentType.includes('text/html')) {
+            const stream = response.data;
+            let decoder;
+            const contentEncoding = responseHeaders['content-encoding'];
+
+            if (contentEncoding === 'gzip') {
+                decoder = stream.pipe(zlib.createGunzip());
+            } else if (contentEncoding === 'deflate') {
+                decoder = stream.pipe(zlib.createInflate());
+            } else if (contentEncoding === 'br') {
+                decoder = stream.pipe(zlib.createBrotliDecompress());
+            } else {
+                decoder = stream;
+            }
+
             let body = '';
-            for await (const chunk of response.data) {
+            for await (const chunk of decoder) {
                 body += chunk.toString();
             }
 
-            const originRegex = new RegExp(target.origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
-            body = body.replace(originRegex, ''); 
+            // --- FINAL, MORE ROBUST REWRITING LOGIC ---
+
+            // 1. Rewrite relative and root-relative URLs (e.g., /path/to/file or path/to/file)
+            body = body.replace(/(src|href|action)=(['"])(?!https?|:|\/\/|#)\/?([^'"]+)\2/gi, (match, attr, quote, url) => {
+                 // Reconstruct the attribute with the full proxied URL, preserving the original host context.
+                 return `${attr}=${quote}${proxyOrigin}${proxyHostPrefix}${target.host}/${url}${quote}`;
+            });
+
+            // 2. Rewrite absolute URLs that point to any subdomain of the target.
+            const hostParts = target.host.split('.');
+            const baseDomain = hostParts.slice(-2).join('.');
+            const urlPattern = new RegExp(`(https?:)?//([a-zA-Z0-9.-]*${baseDomain.replace(/\./g, '\\.')})`, 'g');
+
+            body = body.replace(urlPattern, (match, protocol, host) => {
+                // Rewrite the URL to include the original host, so we can proxy it correctly later.
+                return `${proxyOrigin}${proxyHostPrefix}${host}`;
+            });
 
             body = body.replace(/integrity="[^"]*"/gi, '');
             body = body.replace(/\s+crossorigin(="[^"]*")?/gi, '');
@@ -273,7 +317,6 @@ app.use('/', async (req, res) => {
             }
 
             const injectedContent = `
-                <base href="${target.origin}/">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <style>
                     body {
@@ -298,7 +341,8 @@ app.use('/', async (req, res) => {
                         }, 2000);
                     });
                     try {
-                        const socket = new WebSocket('ws://' + window.location.host);
+                        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                        const socket = new WebSocket(wsProtocol + '//' + window.location.host);
                         socket.addEventListener('message', e => {
                             if (e.data === 'reload') window.location.reload();
                         });
@@ -307,7 +351,7 @@ app.use('/', async (req, res) => {
                 </script>
                 ${autoScrollScript}`;
 
-            body = body.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/gi, '');
+            body = body.replace(/<meta http-equiv="Content-Security-Policy"[^]*>/gi, '');
             if (body.includes('<head>')) {
                 body = body.replace('<head>', `<head>${injectedContent}`);
             } else {
