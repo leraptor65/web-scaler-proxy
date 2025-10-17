@@ -34,47 +34,48 @@ let lastReportedHeight = 'N/A';
 const dataDir = path.join(__dirname, 'data');
 const configPath = path.join(dataDir, 'config.json');
 
-// FINAL FIX: This function is now extremely robust. It handles missing files,
-// empty files, corrupted JSON, and missing keys, always returning a valid config.
-function getConfig() {
-    const defaults = {
-        targetUrl: 'https://www.google.com/',
-        scaleFactor: 1.0,
-        autoScroll: false,
-        scrollSpeed: 50,
-        scrollSequence: ''
-    };
+const defaultConfig = {
+    targetUrl: 'https://www.google.com/',
+    scaleFactor: 1.0,
+    autoScroll: false,
+    scrollSpeed: 50,
+    scrollSequence: ''
+};
 
+function getConfig() {
     if (!fs.existsSync(configPath)) {
-        return defaults;
+        console.log("Config file not found, using defaults.");
+        return defaultConfig;
     }
 
     try {
         const rawData = fs.readFileSync(configPath, 'utf8');
-        // If the file is empty or just whitespace, return defaults
         if (!rawData.trim()) {
-            return defaults;
+            console.log("Config file is empty, using defaults.");
+            return defaultConfig;
         }
         const config = JSON.parse(rawData);
         // Ensure all keys are present by merging with defaults
-        return { ...defaults, ...config };
+        return { ...defaultConfig, ...config };
     } catch (error) {
         console.error("Error reading or parsing config.json, using default values:", error);
-        return defaults;
+        return defaultConfig;
     }
 }
 
+// FIX: This function now throws an error if saving fails, allowing the route handler to catch it.
 function saveConfig(config) {
-    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir);
+    if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+    }
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    console.log("Configuration saved successfully to:", configPath);
 }
 
 // --- Route Handlers ---
 
-// FIX: Handle favicon requests explicitly to prevent them from hitting the proxy.
 app.get('/favicon.ico', (req, res) => res.status(204).send());
 
-// Endpoint for the client to report its page height
 app.post('/report-height', express.json(), (req, res) => {
     const { height } = req.body;
     if (height && typeof height === 'number') {
@@ -86,64 +87,94 @@ app.post('/report-height', express.json(), (req, res) => {
     }
 });
 
-// The configuration page GET route
 app.get('/config', (req, res) => {
-    const config = getConfig(); // This is now guaranteed to be a valid object
+    const config = getConfig();
     fs.readFile(path.join(__dirname, 'config.html'), 'utf8', (err, html) => {
-        if (err) return res.status(500).send('Error loading config page.');
-        const finalHtml = html.replace('', config.targetUrl)
-                              .replace('', config.scaleFactor)
-                              .replace('', config.scrollSpeed)
-                              .replace('', config.scrollSequence || '')
-                              .replace('', config.autoScroll ? 'checked' : '')
-                              .replace('', lastReportedHeight)
-                              .replace('', req.query.saved ? 'success' : '');
+        if (err) {
+            console.error("Error reading config.html:", err);
+            return res.status(500).send('Error loading config page.');
+        }
+
+        const finalHtml = html
+            .replace('%%TARGET_URL%%', config.targetUrl)
+            .replace('%%SCALE_FACTOR%%', config.scaleFactor)
+            .replace('%%SCROLL_SPEED%%', config.scrollSpeed)
+            .replace('%%SCROLL_SEQUENCE%%', config.scrollSequence || '')
+            .replace('%%AUTOSCROLL_CHECKED%%', config.autoScroll ? 'checked' : '')
+            .replace('%%PAGE_HEIGHT%%', lastReportedHeight)
+            .replace('%%SUCCESS_CLASS%%', req.query.saved ? 'success' : '');
         res.send(finalHtml);
     });
 });
 
-// The configuration page POST route
+// FIX: Wrapped the logic in a try...catch block to handle save failures.
 app.post('/config', express.urlencoded({ extended: true }), (req, res) => {
-    const { targetUrl, scaleFactor, scrollSpeed, scrollSequence } = req.body;
-    saveConfig({
-        targetUrl,
-        scaleFactor: parseFloat(scaleFactor),
-        autoScroll: req.body.autoScroll === 'on',
-        scrollSpeed: parseInt(scrollSpeed, 10),
-        scrollSequence: scrollSequence || ''
-    });
-    broadcastReload();
-    res.redirect('/config?saved=true');
+    try {
+        const { targetUrl, scaleFactor, scrollSpeed, scrollSequence } = req.body;
+        const newConfig = {
+            targetUrl,
+            scaleFactor: parseFloat(scaleFactor),
+            autoScroll: req.body.autoScroll === 'on',
+            scrollSpeed: parseInt(scrollSpeed, 10),
+            scrollSequence: scrollSequence || ''
+        };
+        saveConfig(newConfig);
+        broadcastReload();
+        res.redirect('/config?saved=true');
+    } catch (error) {
+        console.error("!!! CRITICAL: Failed to save configuration:", error);
+        res.status(500).send(`
+            <body style="font-family: sans-serif; padding: 2em;">
+                <h1>Error Saving Configuration</h1>
+                <p>The server was unable to save the settings.</p>
+                <p><strong>This is most likely a file permissions issue inside the Docker container.</strong> The application needs permission to write to the <code>/usr/src/app/data</code> directory.</p>
+                <p>Please check the container logs for more details. The error was:</p>
+                <pre style="background-color: #f0f0f0; padding: 1em; border-radius: 5px;">${error.message}</pre>
+                <a href="/config">Go back to configuration</a>
+            </body>
+        `);
+    }
 });
 
-// Route to reset the configuration to defaults
+// FIX: Wrapped the logic in a try...catch block to handle save failures on reset.
 app.post('/reset', (req, res) => {
-    if (fs.existsSync(configPath)) {
-        try {
-            fs.unlinkSync(configPath);
-            console.log('Configuration reset to default.');
-        } catch (err) {
-            console.error('Error deleting config file:', err);
-            return res.status(500).send('Could not reset configuration.');
-        }
+    try {
+        console.log('Resetting configuration to default.');
+        saveConfig(defaultConfig); // Overwrite with defaults
+        broadcastReload();
+        res.redirect('/config');
+    } catch (error) {
+        console.error("!!! CRITICAL: Failed to save configuration on reset:", error);
+        res.status(500).send(`
+            <body style="font-family: sans-serif; padding: 2em;">
+                <h1>Error Resetting Configuration</h1>
+                <p>The server was unable to save the default settings.</p>
+                <p><strong>This is most likely a file permissions issue inside the Docker container.</strong> The application needs permission to write to the <code>/usr/src/app/data</code> directory.</p>
+                <p>Please check the container logs for more details. The error was:</p>
+                <pre style="background-color: #f0f0f0; padding: 1em; border-radius: 5px;">${error.message}</pre>
+                <a href="/config">Go back to configuration</a>
+            </body>
+        `);
     }
-    broadcastReload();
-    res.redirect('/config');
 });
+
 
 // --- Main Proxy Handler (MUST BE LAST) ---
 app.use('/', async (req, res) => {
     const config = getConfig();
     const proxyHost = req.get('host');
-    
-    // FINAL FIX: Prevent ERR_TOO_MANY_REDIRECTS by checking if the target
-    // URL is the proxy's own address.
+
     if (config.targetUrl.includes(proxyHost)) {
-        return res.status(500).send('<h1>Configuration Error</h1><p>The target URL cannot be the same as the proxy address. Please <a href="/config">configure a different URL</a>.</p>');
+        return res.status(500).send(`<h1>Configuration Error</h1><p>The target URL cannot be the same as the proxy address. Please <a href="/config">configure a different URL</a>.</p>`);
     }
 
-    // (The rest of the proxy logic remains the same)
-    let target = new URL(config.targetUrl);
+    let target;
+    try {
+        target = new URL(config.targetUrl);
+    } catch (error) {
+        return res.status(500).send(`<h1>Invalid Target URL</h1><p>The configured URL "${config.targetUrl}" is not valid. Please <a href="/config">correct it</a>.</p>`);
+    }
+    
     let originalUrl = req.originalUrl;
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const proxyOrigin = `${protocol}://${proxyHost}`;
@@ -209,8 +240,7 @@ app.use('/', async (req, res) => {
             let body = Buffer.concat(chunks).toString();
 
             if (contentType.includes('text/html')) {
-                // Perform URL rewriting and script injection as before
-                 const hostParts = target.host.split('.');
+                const hostParts = target.host.split('.');
                 const baseDomain = hostParts.slice(-2).join('.');
                 const urlPattern = new RegExp(`(https?:)?//([a-zA-Z0-9.-]*${baseDomain.replace(/\./g, '\\.')})`, 'g');
                 body = body.replace(/(src|href|action)=(['"])(?!https?|:|\/\/|#)\/?([^'"]+)\2/gi, (match, attr, quote, url) => `${attr}=${quote}${proxyOrigin}${proxyHostPrefix}${target.host}/${url}${quote}`);
@@ -236,3 +266,4 @@ app.use('/', async (req, res) => {
 server.listen(port, () => {
     console.log(`Web Scaler Proxy running on http://localhost:${port}`);
 });
+

@@ -4,16 +4,16 @@ FROM node:20-slim
 # Set the working directory inside the container
 WORKDIR /usr/src/app
 
-# Copy package.json and install dependencies
-COPY package.json ./
+# Copy package.json and package-lock.json (if available)
+COPY package*.json ./
 RUN npm install
 
 # Copy the rest of the application code
 COPY . .
 
-# FIX: Change ownership of the app directory to the node user
-# This allows the app to write the config.json file to the mounted volume.
-RUN chown -R node:node /usr/src/app
+# FIX: Create the data directory and set ownership before mounting the volume.
+# This ensures the 'node' user can write to the volume from the start.
+RUN mkdir -p /usr/src/app/data && chown -R node:node /usr/src/app
 
 # This directory will hold our persistent configuration
 VOLUME /usr/src/app/data
@@ -26,3 +26,4 @@ EXPOSE 1337
 
 # The command to start the application
 CMD ["node", "app.js"]
+

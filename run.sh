@@ -16,6 +16,11 @@ sudo docker rm $CONTAINER_NAME || true
 echo "--- Removing old image... ---"
 sudo docker rmi $IMAGE_NAME || true
 
+# FIX: Forcefully remove the old volume to reset permissions on a clean run.
+# This ensures the new volume is created with the correct ownership.
+echo "--- Removing old Docker volume to reset permissions... ---"
+sudo docker volume rm $VOLUME_NAME || true
+
 # --- Volume Creation ---
 # Create the volume. If it already exists, this command does nothing.
 echo "--- Ensuring Docker volume '$VOLUME_NAME' exists... ---"
