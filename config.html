@@ -83,6 +83,12 @@
         .btn:hover {
             background-color: #2b6cb0;
         }
+        .reset-btn {
+            background-color: #a0aec0;
+        }
+        .reset-btn:hover {
+            background-color: #718096;
+        }
         .success-message {
             display: none;
             text-align: center;
@@ -118,46 +124,49 @@
         <h1>Proxy Settings</h1>
         <p>Configure the URL and display options below.</p>
 
-        <div class="success-message <!--SUCCESS_CLASS-->">
+        <div class="success-message ">
             Settings saved successfully!
         </div>
 
         <form action="/config" method="POST">
             <div class="form-group">
                 <label for="targetUrl">Target URL</label>
-                <input type="url" id="targetUrl" name="targetUrl" value="<!--TARGET_URL-->" required>
+                <input type="url" id="targetUrl" name="targetUrl" value="" required>
             </div>
             <div class="form-group">
                 <label for="scaleFactor">Scale Factor</label>
-                <input type="number" id="scaleFactor" name="scaleFactor" step="0.05" min="0.1" value="<!--SCALE_FACTOR-->" required>
+                <input type="number" id="scaleFactor" name="scaleFactor" step="0.05" min="0.1" value="" required>
                  <small>e.g., 1.0 = 100%, 1.5 = 150%</small>
             </div>
             <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 2rem 0;">
              <div class="form-group">
                 <label for="autoScroll">
-                    <input type="checkbox" id="autoScroll" name="autoScroll" <!--AUTOSCROLL_CHECKED-->>
+                    <input type="checkbox" id="autoScroll" name="autoScroll" >
                     Enable Auto-Scroll
                 </label>
             </div>
             <div class="form-group">
                 <label for="scrollSpeed">Scroll Speed</label>
-                <input type="number" id="scrollSpeed" name="scrollSpeed" min="10" value="<!--SCROLL_SPEED-->" required>
+                <input type="number" id="scrollSpeed" name="scrollSpeed" min="10" value="" required>
                 <small>Pixels per second</small>
             </div>
             <div class="form-group">
                 <label for="scrollSequence">Scroll Sequence (optional)</label>
-                <input type="text" id="scrollSequence" name="scrollSequence" value="<!--SCROLL_SEQUENCE-->" placeholder="e.g., 0-200, 500-800">
+                <input type="text" id="scrollSequence" name="scrollSequence" value="" placeholder="e.g., 0-200, 500-800">
                 <small>Define start-end pixel ranges. If empty, scrolls the whole page.</small>
             </div>
             <button type="submit" class="btn">Save Settings</button>
         </form>
 
+        <form action="/reset" method="POST" style="margin-top: 1rem;">
+            <button type="submit" class="btn reset-btn">Reset to Default</button>
+        </form>
+
         <div class="info-box">
             <strong>Last Reported Page Height:</strong>
-            <span id="pageHeight"><!--LAST_HEIGHT--></span> pixels
+            <span id="pageHeight"></span> pixels
             <small>Visit the main page and wait a few seconds to update this value.</small>
         </div>
     </div>
 </body>
 </html>
-

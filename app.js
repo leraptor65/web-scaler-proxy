@@ -116,6 +116,21 @@ app.post('/config', express.urlencoded({ extended: true }), (req, res) => {
     res.redirect('/config?saved=true');
 });
 
+// Route to reset the configuration to defaults
+app.post('/reset', (req, res) => {
+    if (fs.existsSync(configPath)) {
+        try {
+            fs.unlinkSync(configPath);
+            console.log('Configuration reset to default.');
+        } catch (err) {
+            console.error('Error deleting config file:', err);
+            return res.status(500).send('Could not reset configuration.');
+        }
+    }
+    broadcastReload();
+    res.redirect('/config');
+});
+
 // --- Main Proxy Handler (MUST BE LAST) ---
 app.use('/', async (req, res) => {
     const config = getConfig();
