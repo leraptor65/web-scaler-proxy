@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proxy Configuration</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f7f9;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 1rem;
+        }
+        .container {
+            background: #fff;
+            padding: 2rem 3rem;
+            border-radius: 12px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 500px;
+        }
+        h1 {
+            color: #1a202c;
+            margin-bottom: 0.5rem;
+            text-align: center;
+        }
+        p {
+            color: #718096;
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #4a5568;
+        }
+        .form-group input[type="url"],
+        .form-group input[type="number"],
+        .form-group input[type="text"] {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #cbd5e0;
+            border-radius: 8px;
+            box-sizing: border-box;
+            transition: border-color 0.2s;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #4299e1;
+            box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.5);
+        }
+        .form-group input[type="checkbox"] {
+            margin-right: 0.5rem;
+            transform: scale(1.2);
+        }
+        small {
+            color: #718096;
+            font-size: 0.8rem;
+            display: block;
+            margin-top: 0.25rem;
+        }
+        .btn {
+            width: 100%;
+            padding: 0.85rem;
+            background-color: #3182ce;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .btn:hover {
+            background-color: #2b6cb0;
+        }
+        .success-message {
+            display: none;
+            text-align: center;
+            padding: 1rem;
+            background-color: #c6f6d5;
+            color: #2f855a;
+            border: 1px solid #9ae6b4;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+        }
+        .success-message.success {
+            display: block;
+        }
+        .info-box {
+            text-align: center;
+            padding: 1rem;
+            background-color: #edf2f7;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            margin-top: 1.5rem;
+        }
+        .info-box strong {
+            color: #2d3748;
+        }
+        .info-box span {
+            font-weight: bold;
+            color: #3182ce;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Proxy Settings</h1>
+        <p>Configure the URL and display options below.</p>
+
+        <div class="success-message <!--SUCCESS_CLASS-->">
+            Settings saved successfully!
+        </div>
+
+        <form action="/config" method="POST">
+            <div class="form-group">
+                <label for="targetUrl">Target URL</label>
+                <input type="url" id="targetUrl" name="targetUrl" value="<!--TARGET_URL-->" required>
+            </div>
+            <div class="form-group">
+                <label for="scaleFactor">Scale Factor</label>
+                <input type="number" id="scaleFactor" name="scaleFactor" step="0.05" min="0.1" value="<!--SCALE_FACTOR-->" required>
+                 <small>e.g., 1.0 = 100%, 1.5 = 150%</small>
+            </div>
+            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 2rem 0;">
+             <div class="form-group">
+                <label for="autoScroll">
+                    <input type="checkbox" id="autoScroll" name="autoScroll" <!--AUTOSCROLL_CHECKED-->>
+                    Enable Auto-Scroll
+                </label>
+            </div>
+            <div class="form-group">
+                <label for="scrollSpeed">Scroll Speed</label>
+                <input type="number" id="scrollSpeed" name="scrollSpeed" min="10" value="<!--SCROLL_SPEED-->" required>
+                <small>Pixels per second</small>
+            </div>
+            <div class="form-group">
+                <label for="scrollSequence">Scroll Sequence (optional)</label>
+                <input type="text" id="scrollSequence" name="scrollSequence" value="<!--SCROLL_SEQUENCE-->" placeholder="e.g., 0-200, 500-800">
+                <small>Define start-end pixel ranges. If empty, scrolls the whole page.</small>
+            </div>
+            <button type="submit" class="btn">Save Settings</button>
+        </form>
+
+        <div class="info-box">
+            <strong>Last Reported Page Height:</strong>
+            <span id="pageHeight"><!--LAST_HEIGHT--></span> pixels
+            <small>Visit the main page and wait a few seconds to update this value.</small>
+        </div>
+    </div>
+</body>
+</html>
+

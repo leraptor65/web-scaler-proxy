@@ -1,0 +1,12 @@
+# Ignore Node.js dependency folder
+node_modules/
+
+# Ignore the persistent data directory
+# This may contain the target URL, which could be sensitive
+data/
+
+# Ignore npm debug logs
+npm-debug.log*
+
+# Ignore environment variables (if you ever add one)
+.env
